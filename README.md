@@ -1,6 +1,6 @@
 # Hi, I'm Pushpak Jaiswal 👋
 
-![GitHub Avatar](https://avatars.githubusercontent.com/u/149317014?v=4)
+  ![GitHub Avatar](https://avatars.githubusercontent.com/u/149317014?v=4)
 
 🎓 **Student | Aspiring Full-Stack & AI/ML Developer**
 
