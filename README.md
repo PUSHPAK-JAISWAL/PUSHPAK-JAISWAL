@@ -57,8 +57,7 @@ A collaborative open source repository focused on simplifying server startup pro
 
 ## 🐍 Contribution Snake Game
 
-![Snake animation](https://github.com/PUSHPAK-JAISWAL/PUSHPAK-JAISWAL/blob/output/github-contribution-grid-snake.svg)
-
+![GitHub Contribution Snake dark](./dist/github-contribution-grid-snake-dark.svg)
 ---
 
 Thanks for stopping by! Let's learn, build, and grow together. 🚀
