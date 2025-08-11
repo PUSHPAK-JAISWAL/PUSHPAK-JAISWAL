@@ -24,15 +24,6 @@ I am passionate about learning and building impactful projects in both web and A
 
 ---
 
-## 📈 GitHub Stats
-
-* **Public Repositories:** 3
-* **Followers:** 5
-* **Following:** 2
-* **Account Created:** 2023-10-29
-
----
-
 ## 🌟 Certifications & Achievements
 
 * **Hackerrank:** 9 certificates
