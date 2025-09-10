@@ -42,6 +42,7 @@ I am passionate about learning and building impactful projects in both web and A
 A collaborative open source repository focused on simplifying server startup processes. Check it out for innovative solutions and practical tools!
 
 ---
+![Profile views](https://komarev.com/ghpvc/?username=PUSHPAK-JAISWAL&label=Profile%20views&color=0e75b6&style=flat)
 
 ## 🏆 GitHub Profile Trophies
 
