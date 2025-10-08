@@ -1,0 +1,198 @@
+name: Daily Random Commits -> PR -> Review -> Merge
+
+# Runs daily and can be triggered manually with the button
+on:
+  schedule:
+    # default: daily at 00:00 UTC. Change to whatever cron you prefer.
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      merge_delay_seconds:
+        description: 'Number of seconds to wait AFTER creating the PR before merging it'
+        required: false
+        default: '60'
+
+permissions:
+  contents: write        # needed to push commits
+  pull-requests: write   # needed to create/merge PRs
+  issues: write          # optional, if you want to add comments/issues later
+
+concurrency:
+  group: auto-random-commits-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  create-commits-and-pr:
+    runs-on: ubuntu-latest
+    env:
+      # Default delay if not provided via workflow_dispatch
+      DEFAULT_MERGE_DELAY: '60'
+      TEST_FILE: test.txt
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create branch and make random commits
+        id: make_commits
+        run: |
+          set -e
+          # generate between 1 and 10 commits
+          COUNT=$(( (RANDOM % 10) + 1 ))
+          echo "commits=$COUNT" >> $GITHUB_OUTPUT
+
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          BRANCH="auto/random-commits-${TIMESTAMP}-${RANDOM}"
+
+          # create branch from default branch (fetch remote default ref)
+          git fetch origin
+          # Use default branch from the remote HEAD
+          DEFAULT_BRANCH=$(git remote show origin | awk -F': ' '/HEAD branch/ {print $2}')
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            DEFAULT_BRANCH="main"
+          fi
+          echo "default_branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
+
+          git checkout -b "$BRANCH" "origin/$DEFAULT_BRANCH" || git checkout -b "$BRANCH"
+
+          # Make the requests test file if missing
+          if [ ! -f "$TEST_FILE" ]; then
+            echo "This is an auto generated test file." > "$TEST_FILE"
+            git add "$TEST_FILE"
+            git commit -m "chore: create $TEST_FILE (initial)"
+          fi
+
+          for i in $(seq 1 $COUNT); do
+            echo "Auto update #$i - $(date --iso-8601=seconds) - rand:$RANDOM" >> "$TEST_FILE"
+            git add "$TEST_FILE"
+            git commit -m "chore: auto update #$i on $(date --iso-8601=seconds)"
+            # small local delay so commits have different timestamps (optional)
+            sleep 1
+          done
+
+          git push --set-upstream origin "$BRANCH"
+
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "pushed_branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        id: create_pr
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            // get default branch from repo info to be sure
+            const repoInfo = await github.rest.repos.get({ owner, repo });
+            const base = repoInfo.data.default_branch;
+
+            const head = core.getInput('head') || process.env.GITHUB_REF_NAME || '${{ steps.make_commits.outputs.branch }}';
+            // fallback to the branch we pushed
+            const pushedBranch = `${{ steps.make_commits.outputs.branch }}`;
+            const headBranch = pushedBranch || head;
+
+            const title = `Automated: ${Math.floor(Math.random()*9000)+1000} — ${new Date().toISOString().slice(0,10)} - ${headBranch}`;
+            const body = `This PR was created automatically by the 'Daily Random Commits' workflow.\n\nIt contains ${process.env.COUNT || '${{ steps.make_commits.outputs.commits }}'} auto-generated commit(s).`;
+
+            const pr = await github.rest.pulls.create({
+              owner,
+              repo,
+              title,
+              head: headBranch,
+              base,
+              body
+            });
+
+            core.setOutput('pr_number', pr.data.number);
+            core.setOutput('pr_url', pr.data.html_url);
+            core.setOutput('pr_head', headBranch);
+            core.setOutput('pr_base', base);
+
+            console.log(`Created PR #${pr.data.number} -> ${pr.data.html_url}`);
+
+      - name: Post automated review comment on PR
+        if: ${{ steps.create_pr.outputs.pr_number }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr_number = parseInt('${{ steps.create_pr.outputs.pr_number }}', 10);
+
+            // Create a review with a comment
+            await github.rest.pulls.createReview({
+              owner,
+              repo,
+              pull_number: pr_number,
+              body: `Automated review: I checked the changes. This PR will be merged automatically after the configured delay.`,
+              event: 'COMMENT'
+            });
+
+            // Optionally also add a normal issue comment for visibility
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: pr_number,
+              body: `Automated note: PR created by workflow <${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}>`
+            });
+
+      - name: Wait before merging (configurable)
+        id: wait_merge
+        run: |
+          # choose merge delay: from workflow_dispatch input if provided, else default
+          MERGE_DELAY="${{ github.event.inputs.merge_delay_seconds || env.DEFAULT_MERGE_DELAY }}"
+          echo "Waiting for ${MERGE_DELAY} seconds before attempting to merge PR..."
+          sleep "$MERGE_DELAY"
+        env:
+          DEFAULT_MERGE_DELAY: ${{ env.DEFAULT_MERGE_DELAY }}
+
+      - name: Merge PR
+        if: ${{ steps.create_pr.outputs.pr_number }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr_number = parseInt('${{ steps.create_pr.outputs.pr_number }}', 10);
+
+            try {
+              const mergeResult = await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: pr_number,
+                // choose merge_method: "merge", "squash", or "rebase"
+                merge_method: "merge"
+              });
+
+              if (mergeResult.status === 200) {
+                console.log(`PR #${pr_number} merged successfully.`);
+              } else {
+                console.log(`Merge returned status ${mergeResult.status}`, mergeResult.data);
+              }
+
+              // delete the branch after merge
+              const branchRef = `${{ steps.create_pr.outputs.pr_head }}`;
+              if (branchRef) {
+                // remove possible remote prefix
+                const refName = branchRef.replace(/^refs\/heads\//, '');
+                try {
+                  await github.rest.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${refName}`
+                  });
+                  console.log(`Deleted branch heads/${refName}`);
+                } catch (err) {
+                  console.log(`Could not delete branch heads/${refName}: ${err.message}`);
+                }
+              }
+
+            } catch (err) {
+              core.setFailed(`Failed to merge PR #${pr_number}: ${err.message}`);
+            }
