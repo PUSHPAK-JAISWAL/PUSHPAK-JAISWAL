@@ -1,198 +1,245 @@
-name: Daily Random Commits -> PR -> Review -> Merge
+name: Hidden Random PRs -> Approve (you) -> Merge -> Delete
 
-# Runs daily and can be triggered manually with the button
 on:
   schedule:
-    # default: daily at 00:00 UTC. Change to whatever cron you prefer.
+    # daily at 00:00 UTC by default — change to your preferred cron
     - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       merge_delay_seconds:
-        description: 'Number of seconds to wait AFTER creating the PR before merging it'
+        description: 'Seconds to wait AFTER creating each PR before merging it'
         required: false
-        default: '60'
+        default: '30'
+      pr_interval_seconds:
+        description: 'Seconds to wait between processing successive PRs'
+        required: false
+        default: '10'
+      num_lines:
+        description: 'Number of fixed lines in test file (keeps file size constant)'
+        required: false
+        default: '100'
+      min_commits:
+        description: 'Minimum number of commits/PRs (random)'
+        required: false
+        default: '1'
+      max_commits:
+        description: 'Maximum number of commits/PRs (random)'
+        required: false
+        default: '5'
+      target_base_branch:
+        description: 'Branch to receive these automated merges (keeps main untouched)'
+        required: false
+        default: 'automation-hidden'
 
 permissions:
-  contents: write        # needed to push commits
-  pull-requests: write   # needed to create/merge PRs
-  issues: write          # optional, if you want to add comments/issues later
+  contents: write
+  pull-requests: write
+  issues: write
 
 concurrency:
-  group: auto-random-commits-${{ github.repository }}
+  group: hidden-random-prs-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  create-commits-and-pr:
+  run:
     runs-on: ubuntu-latest
     env:
-      # Default delay if not provided via workflow_dispatch
-      DEFAULT_MERGE_DELAY: '60'
       TEST_FILE: test.txt
+      GITHUB_API: https://api.github.com
     steps:
-      - name: Checkout repository
+      - name: Checkout repo (full) using PAT for push permissions
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.USER_PAT }}
 
       - name: Setup git identity
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Create branch and make random commits
-        id: make_commits
+      - name: Read inputs and set outputs
+        id: inputs
         run: |
-          set -e
-          # generate between 1 and 10 commits
-          COUNT=$(( (RANDOM % 10) + 1 ))
-          echo "commits=$COUNT" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          MERGE_DELAY=${{ github.event.inputs.merge_delay_seconds || '30' }}
+          PR_INTERVAL=${{ github.event.inputs.pr_interval_seconds || '10' }}
+          NUM_LINES=${{ github.event.inputs.num_lines || '100' }}
+          MIN_C=${{ github.event.inputs.min_commits || '1' }}
+          MAX_C=${{ github.event.inputs.max_commits || '5' }}
+          TARGET_BRANCH=${{ github.event.inputs.target_base_branch || 'automation-hidden' }}
 
-          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
-          BRANCH="auto/random-commits-${TIMESTAMP}-${RANDOM}"
+          echo "merge_delay=$MERGE_DELAY" >> $GITHUB_OUTPUT
+          echo "pr_interval=$PR_INTERVAL" >> $GITHUB_OUTPUT
+          echo "num_lines=$NUM_LINES" >> $GITHUB_OUTPUT
+          echo "min_commits=$MIN_C" >> $GITHUB_OUTPUT
+          echo "max_commits=$MAX_C" >> $GITHUB_OUTPUT
+          echo "target_branch=$TARGET_BRANCH" >> $GITHUB_OUTPUT
 
-          # create branch from default branch (fetch remote default ref)
-          git fetch origin
-          # Use default branch from the remote HEAD
+      - name: Determine repo info
+        id: repoinfo
+        run: |
+          echo "owner=${{ github.repository_owner }}" >> $GITHUB_OUTPUT
+          echo "repo=${{ github.event.repository.name }}" >> $GITHUB_OUTPUT
+          # find default branch
           DEFAULT_BRANCH=$(git remote show origin | awk -F': ' '/HEAD branch/ {print $2}')
-          if [ -z "$DEFAULT_BRANCH" ]; then
-            DEFAULT_BRANCH="main"
-          fi
+          if [ -z "$DEFAULT_BRANCH" ]; then DEFAULT_BRANCH="main"; fi
           echo "default_branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
 
-          git checkout -b "$BRANCH" "origin/$DEFAULT_BRANCH" || git checkout -b "$BRANCH"
+      - name: Ensure target base branch exists and contains the fixed test file
+        env:
+          USER_PAT: ${{ secrets.USER_PAT }}
+        run: |
+          set -euo pipefail
+          OWNER=${{ steps.repoinfo.outputs.owner }}
+          REPO=${{ steps.repoinfo.outputs.repo }}
+          DEFAULT_BRANCH=${{ steps.repoinfo.outputs.default_branch }}
+          TARGET_BRANCH=${{ steps.inputs.outputs.target_branch }}
+          NUM_LINES=${{ steps.inputs.outputs.num_lines }}
+          FILE="${{ env.TEST_FILE }}"
 
-          # Make the requests test file if missing
-          if [ ! -f "$TEST_FILE" ]; then
-            echo "This is an auto generated test file." > "$TEST_FILE"
-            git add "$TEST_FILE"
-            git commit -m "chore: create $TEST_FILE (initial)"
+          # fetch remote refs
+          git fetch origin --prune
+
+          # check if target branch exists remotely
+          if git ls-remote --heads origin "$TARGET_BRANCH" | grep -q refs/heads; then
+            echo "Target branch '$TARGET_BRANCH' exists remotely. Checking out..."
+            git checkout "$TARGET_BRANCH"
+            git pull origin "$TARGET_BRANCH" --ff-only || true
+          else
+            echo "Target branch '$TARGET_BRANCH' does not exist. Creating from default branch '$DEFAULT_BRANCH'..."
+            # ensure we have DEFAULT_BRANCH locally
+            git fetch origin "$DEFAULT_BRANCH":"$DEFAULT_BRANCH" --depth=1 || true
+            git checkout -b "$TARGET_BRANCH" "origin/$DEFAULT_BRANCH" || git checkout -b "$TARGET_BRANCH"
+            # push new branch
+            git push "https://${USER_PAT}@github.com/${OWNER}/${REPO}.git" "$TARGET_BRANCH" -q
           fi
 
+          # Ensure FILE exists on target branch and has NUM_LINES exact lines (pad/truncate)
+          if [ ! -f "$FILE" ]; then
+            echo "Creating $FILE with $NUM_LINES lines on $TARGET_BRANCH..."
+            seq 1 $NUM_LINES | awk '{printf "Line %04d: placeholder\n", $0}' > "$FILE"
+            git add "$FILE"
+            git commit -m "chore: create $FILE with $NUM_LINES lines (initial)" || true
+            git push "https://${USER_PAT}@github.com/${OWNER}/${REPO}.git" "$TARGET_BRANCH" -q || true
+          else
+            LINES_CURRENT=$(wc -l < "$FILE" || echo 0)
+            if [ "$LINES_CURRENT" -lt "$NUM_LINES" ]; then
+              seq $((LINES_CURRENT+1)) $NUM_LINES | awk '{printf "Line %04d: placeholder\n", $0}' >> "$FILE"
+              git add "$FILE"
+              git commit -m "chore: pad $FILE to ${NUM_LINES} lines" || true
+              git push "https://${USER_PAT}@github.com/${OWNER}/${REPO}.git" "$TARGET_BRANCH" -q || true
+            elif [ "$LINES_CURRENT" -gt "$NUM_LINES" ]; then
+              head -n "$NUM_LINES" "$FILE" > "$FILE.tmp"
+              mv "$FILE.tmp" "$FILE"
+              git add "$FILE"
+              git commit -m "chore: truncate $FILE to ${NUM_LINES} lines" || true
+              git push "https://${USER_PAT}@github.com/${OWNER}/${REPO}.git" "$TARGET_BRANCH" -q || true
+            else
+              echo "$FILE already has $NUM_LINES lines on $TARGET_BRANCH."
+            fi
+          fi
+
+      - name: Create N branches each with 1 commit -> PR -> approve (you) -> merge -> delete
+        env:
+          REPO_OWNER: ${{ steps.repoinfo.outputs.owner }}
+          REPO_NAME: ${{ steps.repoinfo.outputs.repo }}
+          USER_PAT: ${{ secrets.USER_PAT }}
+        run: |
+          set -euo pipefail
+          TARGET_BRANCH=${{ steps.inputs.outputs.target_branch }}
+          MIN_C=${{ steps.inputs.outputs.min_commits }}
+          MAX_C=${{ steps.inputs.outputs.max_commits }}
+          NUM_LINES=${{ steps.inputs.outputs.num_lines }}
+          MERGE_DELAY=${{ steps.inputs.outputs.merge_delay }}
+          PR_INTERVAL=${{ steps.inputs.outputs.pr_interval }}
+          FILE="${{ env.TEST_FILE }}"
+          OWNER="${REPO_OWNER}"
+          REPO="${REPO_NAME}"
+          API="${{ env.GITHUB_API }}"
+
+          # compute random count between min and max using /dev/urandom
+          RANGE=$((MAX_C - MIN_C + 1))
+          if [ "$RANGE" -le 0 ]; then
+            COUNT=$MIN_C
+          else
+            RANDBYTE=$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')
+            COUNT=$(( (RANDBYTE % RANGE) + MIN_C ))
+          fi
+          echo "Creating $COUNT one-commit PR(s) into $TARGET_BRANCH."
+
           for i in $(seq 1 $COUNT); do
-            echo "Auto update #$i - $(date --iso-8601=seconds) - rand:$RANDOM" >> "$TEST_FILE"
-            git add "$TEST_FILE"
-            git commit -m "chore: auto update #$i on $(date --iso-8601=seconds)"
-            # small local delay so commits have different timestamps (optional)
-            sleep 1
+            TS=$(date -u +"%Y%m%dT%H%M%SZ")
+            BRANCH="auto/hidden-pr-${TS}-${i}-$((RANDOM % 10000))"
+
+            # make branch from target branch
+            git fetch origin "$TARGET_BRANCH":"$TARGET_BRANCH" --depth=1 || true
+            git checkout -b "$BRANCH" "origin/${TARGET_BRANCH}" || git checkout -b "$BRANCH"
+
+            # choose random line to replace (1..NUM_LINES)
+            RANDLINE=$(( (RANDOM % NUM_LINES) + 1 ))
+            NEW_TEXT="Updated by workflow run $GITHUB_RUN_ID on $(date -u --iso-8601=seconds) (pr #${i})"
+            awk -v n="$RANDLINE" -v txt="$NEW_TEXT" 'NR==n{$0=txt} {print}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+
+            git add "$FILE"
+            git commit -m "chore: update $FILE (line $RANDLINE) — auto commit ${i}" || true
+
+            # push branch using PAT
+            git push "https://${USER_PAT}@github.com/${OWNER}/${REPO}.git" "$BRANCH" -q
+
+            # create PR into TARGET_BRANCH using PAT
+            PR_TITLE="Automated update: ${TS} — ${BRANCH}"
+            PR_BODY="This PR updates line ${RANDLINE} of ${FILE}. Created by workflow run ${GITHUB_RUN_ID}."
+
+            PR_JSON=$(curl -s -X POST -H "Authorization: token ${USER_PAT}" -H "Accept: application/vnd.github+json" \
+              "${API}/repos/${OWNER}/${REPO}/pulls" \
+              -d "$(jq -n --arg head "$BRANCH" --arg base "$TARGET_BRANCH" --arg title "$PR_TITLE" --arg body "$PR_BODY" '{head:$head, base:$base, title:$title, body:$body}')" )
+
+            PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+            PR_URL=$(echo "$PR_JSON" | jq -r '.html_url')
+            if [ "$PR_NUMBER" = "null" ] || [ -z "$PR_NUMBER" ]; then
+              echo "Failed to create PR for branch $BRANCH. Response:"
+              echo "$PR_JSON"
+              exit 1
+            fi
+            echo "Created PR #$PR_NUMBER -> $PR_URL"
+
+            # Approve the PR using your PAT (counts as your review)
+            REVIEW_BODY="Automated approval by PAT owner: approving this small automated change."
+            curl -s -X POST -H "Authorization: token ${USER_PAT}" -H "Accept: application/vnd.github+json" \
+              "${API}/repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/reviews" \
+              -d "$(jq -n --arg body "$REVIEW_BODY" --arg event "APPROVE" '{body:$body, event:$event}')" >/dev/null
+
+            echo "Posted approval review on PR #${PR_NUMBER}."
+
+            # wait before merging
+            echo "Waiting ${MERGE_DELAY}s before merging PR #${PR_NUMBER}..."
+            sleep "${MERGE_DELAY}"
+
+            # Merge the PR into TARGET_BRANCH
+            MERGE_JSON=$(curl -s -X PUT -H "Authorization: token ${USER_PAT}" -H "Accept: application/vnd.github+json" \
+              "${API}/repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/merge" \
+              -d '{"merge_method":"merge"}')
+
+            MERGED=$(echo "$MERGE_JSON" | jq -r '.merged')
+            if [ "$MERGED" = "true" ]; then
+              echo "PR #${PR_NUMBER} merged successfully into ${TARGET_BRANCH}."
+
+              # delete remote branch (source)
+              curl -s -X DELETE -H "Authorization: token ${USER_PAT}" -H "Accept: application/vnd.github+json" \
+                "${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}" >/dev/null || true
+              echo "Deleted branch ${BRANCH}"
+            else
+              echo "Merge returned: $MERGE_JSON"
+            fi
+
+            # switch back to target branch for next iteration
+            git checkout "$TARGET_BRANCH" || git checkout -b "$TARGET_BRANCH"
+            git fetch origin "$TARGET_BRANCH":"$TARGET_BRANCH" --depth=1 || true
+
+            # wait between PRs
+            echo "Waiting ${PR_INTERVAL}s before next PR..."
+            sleep "${PR_INTERVAL}"
           done
 
-          git push --set-upstream origin "$BRANCH"
-
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "pushed_branch=$BRANCH" >> $GITHUB_OUTPUT
-
-      - name: Create Pull Request
-        id: create_pr
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            // get default branch from repo info to be sure
-            const repoInfo = await github.rest.repos.get({ owner, repo });
-            const base = repoInfo.data.default_branch;
-
-            const head = core.getInput('head') || process.env.GITHUB_REF_NAME || '${{ steps.make_commits.outputs.branch }}';
-            // fallback to the branch we pushed
-            const pushedBranch = `${{ steps.make_commits.outputs.branch }}`;
-            const headBranch = pushedBranch || head;
-
-            const title = `Automated: ${Math.floor(Math.random()*9000)+1000} — ${new Date().toISOString().slice(0,10)} - ${headBranch}`;
-            const body = `This PR was created automatically by the 'Daily Random Commits' workflow.\n\nIt contains ${process.env.COUNT || '${{ steps.make_commits.outputs.commits }}'} auto-generated commit(s).`;
-
-            const pr = await github.rest.pulls.create({
-              owner,
-              repo,
-              title,
-              head: headBranch,
-              base,
-              body
-            });
-
-            core.setOutput('pr_number', pr.data.number);
-            core.setOutput('pr_url', pr.data.html_url);
-            core.setOutput('pr_head', headBranch);
-            core.setOutput('pr_base', base);
-
-            console.log(`Created PR #${pr.data.number} -> ${pr.data.html_url}`);
-
-      - name: Post automated review comment on PR
-        if: ${{ steps.create_pr.outputs.pr_number }}
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const pr_number = parseInt('${{ steps.create_pr.outputs.pr_number }}', 10);
-
-            // Create a review with a comment
-            await github.rest.pulls.createReview({
-              owner,
-              repo,
-              pull_number: pr_number,
-              body: `Automated review: I checked the changes. This PR will be merged automatically after the configured delay.`,
-              event: 'COMMENT'
-            });
-
-            // Optionally also add a normal issue comment for visibility
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: pr_number,
-              body: `Automated note: PR created by workflow <${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}>`
-            });
-
-      - name: Wait before merging (configurable)
-        id: wait_merge
-        run: |
-          # choose merge delay: from workflow_dispatch input if provided, else default
-          MERGE_DELAY="${{ github.event.inputs.merge_delay_seconds || env.DEFAULT_MERGE_DELAY }}"
-          echo "Waiting for ${MERGE_DELAY} seconds before attempting to merge PR..."
-          sleep "$MERGE_DELAY"
-        env:
-          DEFAULT_MERGE_DELAY: ${{ env.DEFAULT_MERGE_DELAY }}
-
-      - name: Merge PR
-        if: ${{ steps.create_pr.outputs.pr_number }}
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const pr_number = parseInt('${{ steps.create_pr.outputs.pr_number }}', 10);
-
-            try {
-              const mergeResult = await github.rest.pulls.merge({
-                owner,
-                repo,
-                pull_number: pr_number,
-                // choose merge_method: "merge", "squash", or "rebase"
-                merge_method: "merge"
-              });
-
-              if (mergeResult.status === 200) {
-                console.log(`PR #${pr_number} merged successfully.`);
-              } else {
-                console.log(`Merge returned status ${mergeResult.status}`, mergeResult.data);
-              }
-
-              // delete the branch after merge
-              const branchRef = `${{ steps.create_pr.outputs.pr_head }}`;
-              if (branchRef) {
-                // remove possible remote prefix
-                const refName = branchRef.replace(/^refs\/heads\//, '');
-                try {
-                  await github.rest.git.deleteRef({
-                    owner,
-                    repo,
-                    ref: `heads/${refName}`
-                  });
-                  console.log(`Deleted branch heads/${refName}`);
-                } catch (err) {
-                  console.log(`Could not delete branch heads/${refName}: ${err.message}`);
-                }
-              }
-
-            } catch (err) {
-              core.setFailed(`Failed to merge PR #${pr_number}: ${err.message}`);
-            }
+          echo "Finished creating and merging $COUNT PR(s) into ${TARGET_BRANCH}."
