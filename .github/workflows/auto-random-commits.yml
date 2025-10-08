@@ -25,7 +25,7 @@ on:
       max_commits:
         description: 'Maximum number of commits/PRs (random)'
         required: false
-        default: '5'
+        default: '10'
       target_base_branch:
         description: 'Branch to receive these automated merges (keeps main untouched)'
         required: false
