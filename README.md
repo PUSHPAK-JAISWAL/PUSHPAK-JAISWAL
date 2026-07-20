@@ -50,20 +50,9 @@ A collaborative open source repository focused on simplifying server startup pro
 
 ---
 
-## 🐍 Contribution Snake Game
+## Activity HeatMap
 
-<details>
-  <summary>Toggle Snake Game Theme</summary>
-
-**Dark Theme**
-
-![GitHub Contribution Snake dark](./dist/github-contribution-grid-snake-dark.svg)
-
-**Light Theme**
-
-![GitHub Contribution Snake light](./dist/github-contribution-grid-snake.svg)
-
-</details>
+<img src="https://ghchart.rshah.org/PUSHPAK-JAISWAL"/>
 
 ---
 
