@@ -1,0 +1,31 @@
+name: Generate GitHub Activity Graph
+
+on:
+  schedule:
+    - cron: "0 */12 * * *" # every 12 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate Activity Graph
+        uses: Ashutosh00710/github-readme-activity-graph@v1.6.0
+        with:
+          username: PUSHPAK-JAISWAL
+          filename: profile-activity-graph.svg
+          theme: github-compact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push graph to output branch
+        uses: crazy-max/ghaction-github-pages@v4
+        with:
+          target_branch: output
+          build_dir: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
