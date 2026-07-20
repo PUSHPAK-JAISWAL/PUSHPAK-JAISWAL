@@ -1,44 +1,56 @@
 name: Generate & Commit Snake
 
-# grant the GITHUB_TOKEN permission to push commits
 permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: "0 0 * * *"  # daily at midnight
   workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+concurrency:
+  group: snake
+  cancel-in-progress: true
 
 jobs:
   generate:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # keep the default token so that `git push` works
+          fetch-depth: 0
           persist-credentials: true
 
-      - name: Generate contribution-snake SVGs
-        uses: Platane/snk@v3
+      - name: Show repository information
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Owner: ${{ github.repository_owner }}"
+          echo "Actor: ${{ github.actor }}"
+
+      - name: Generate contribution snake
+        uses: Platane/snk@v3.2.0
         with:
-          github_user_name: ${{ github.repository_owner }}
+          github_user_name: PUSHPAK-JAISWAL
           outputs: |
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit and push if changed
+      - name: Commit generated files
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p dist
           git add dist/*.svg
-          # only commit if there are changes
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update GitHub contribution snake [skip ci]"
-            git push
-          else
-            echo "No changes to SVGs; skipping commit."
+
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+            exit 0
           fi
+
+          git commit -m "chore: update contribution snake [skip ci]"
+          git push
