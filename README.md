@@ -46,7 +46,11 @@ A collaborative open source repository focused on simplifying server startup pro
 
 ## 🏆 GitHub Profile Trophies
 
-[![GitHub Profile Trophies](https://pushpak-jaiswal.github.io/?username=Pushpak-Jaiswal&theme=flat)](https://github.com/ryo-ma/github-profile-trophy)
+<p align="center">
+  <a href="https://github.com/ryo-ma/github-profile-trophy">
+    <img src="./profile-trophies.svg" alt="GitHub Profile Trophies" />
+  </a>
+</p>
 
 ---
 
