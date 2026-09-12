@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs daily at 00:00 UTC to refresh stats for the day
     - cron: '0 0 * * *'
-  workflow_dispatch: # Allows manual trigger at any time from GitHub Actions tab
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -21,49 +21,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Generate Trophies SVG with Deno
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PORT: 8080
+      - name: Fetch Profile Trophies SVG
         run: |
-          # 1. Clone the official public repository directly (no fork or auth needed)
-          git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
-          cd /tmp/trophy-engine
-
-          # 2. Cache dependencies
-          deno cache main.ts
-
-          # 3. Start local Deno server in the background
-          echo "[Trophies] Starting local Deno server via main.ts..."
-          deno run -A main.ts &
-          SERVER_PID=$!
-
-          # 4. Wait for server to bind on port 8080
-          echo "[Trophies] Waiting for local server on http://localhost:8080..."
-          for i in {1..30}; do
-            if curl -s "http://localhost:8080/?username=${{ github.repository_owner }}" >/dev/null 2>&1; then
-              echo "[Trophies] Server ready."
-              break
-            fi
-            sleep 1
+          echo "[Trophies] Downloading trophy SVG..."
+          
+          # Retry up to 3 times in case of cold-start delay
+          for i in {1..3}; do
+            curl -fsSL \
+              -A "Mozilla/5.0 (GitHubActions-CacheBot)" \
+              "https://github-profile-trophy.vercel.app/?username=${{ github.repository_owner }}&theme=flat" \
+              -o profile-trophies.svg && break || sleep 5
           done
 
-          # 5. Fetch rendered SVG
-          curl -fsSL "http://localhost:8080/?username=${{ github.repository_owner }}&theme=flat" -o "${GITHUB_WORKSPACE}/profile-trophies.svg"
-
-          # 6. Stop local server
-          kill $SERVER_PID 2>/dev/null || true
-
-          cd "${GITHUB_WORKSPACE}"
-
-          # 7. Check if file is valid SVG
+          # Check that we received valid SVG markup
           if [ -f "profile-trophies.svg" ] && grep -q "<svg" profile-trophies.svg; then
-            echo "[Trophies] Valid SVG generated successfully ($(wc -c < profile-trophies.svg) bytes)."
+            echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
           else
             echo "[Trophies] Error: Did not receive valid SVG output."
             cat profile-trophies.svg
