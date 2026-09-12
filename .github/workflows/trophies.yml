@@ -24,41 +24,49 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v1.x
+          deno-version: v2.x
 
       - name: Generate Trophies SVG with Deno
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PORT: 8080
         run: |
-          # 1. Clone the repository
-          git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
+          # 1. Clone the generator repository
+          git clone --depth=1 https://github.com/pushpak-jaiswal/github-profile-trophy-Github-pages.git /tmp/trophy-engine
           cd /tmp/trophy-engine
 
-          # 2. Run runner script to fetch data and write SVG directly
-          deno run --allow-net --allow-env --allow-read --allow-write - << 'EOF'
-          import { renderTrophy } from "./mod.ts";
+          # 2. Pre-cache dependencies
+          deno cache main.ts
 
-          const username = "${{ github.repository_owner }}";
-          const theme = "flat";
+          # 3. Start local server in background
+          echo "[Trophies] Launching local Deno service via main.ts..."
+          deno run -A main.ts &
+          SERVER_PID=$!
 
-          try {
-            console.log(`[Trophies] Generating SVG for user: ${username}...`);
-            const svg = await renderTrophy(username, { theme });
-            await Deno.writeTextFile("${{ github.workspace }}/profile-trophies.svg", svg);
-            console.log("[Trophies] SVG generated successfully.");
-          } catch (err) {
-            console.error("[Trophies] Generation failed:", err);
-            Deno.exit(1);
-          }
-          EOF
+          # 4. Wait for server to bind and respond on port 8080
+          echo "[Trophies] Waiting for server on http://localhost:8080..."
+          for i in {1..30}; do
+            if curl -s "http://localhost:8080/?username=${{ github.repository_owner }}" >/dev/null 2>&1; then
+              echo "[Trophies] Server is ready."
+              break
+            fi
+            sleep 1
+          done
+
+          # 5. Download the rendered SVG directly
+          curl -fsSL "http://localhost:8080/?username=${{ github.repository_owner }}&theme=flat" -o "${GITHUB_WORKSPACE}/profile-trophies.svg"
+
+          # 6. Stop background server
+          kill $SERVER_PID 2>/dev/null || true
 
           cd "${GITHUB_WORKSPACE}"
 
-          # 3. Validate output file
+          # 7. Validate output SVG file
           if [ -f "profile-trophies.svg" ] && grep -q "<svg" profile-trophies.svg; then
             echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
           else
             echo "[Trophies] Error: Output does not contain a valid SVG."
+            cat profile-trophies.svg
             exit 1
           fi
 
