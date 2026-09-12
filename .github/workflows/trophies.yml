@@ -31,41 +31,41 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PORT: 8080
         run: |
-          # 1. Clone the generator repository
-          git clone --depth=1 https://github.com/pushpak-jaiswal/github-profile-trophy-Github-pages.git /tmp/trophy-engine
+          # 1. Clone the official public repository directly (no fork or auth needed)
+          git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
           cd /tmp/trophy-engine
 
-          # 2. Pre-cache dependencies
+          # 2. Cache dependencies
           deno cache main.ts
 
-          # 3. Start local server in background
-          echo "[Trophies] Launching local Deno service via main.ts..."
+          # 3. Start local Deno server in the background
+          echo "[Trophies] Starting local Deno server via main.ts..."
           deno run -A main.ts &
           SERVER_PID=$!
 
-          # 4. Wait for server to bind and respond on port 8080
-          echo "[Trophies] Waiting for server on http://localhost:8080..."
+          # 4. Wait for server to bind on port 8080
+          echo "[Trophies] Waiting for local server on http://localhost:8080..."
           for i in {1..30}; do
             if curl -s "http://localhost:8080/?username=${{ github.repository_owner }}" >/dev/null 2>&1; then
-              echo "[Trophies] Server is ready."
+              echo "[Trophies] Server ready."
               break
             fi
             sleep 1
           done
 
-          # 5. Download the rendered SVG directly
+          # 5. Fetch rendered SVG
           curl -fsSL "http://localhost:8080/?username=${{ github.repository_owner }}&theme=flat" -o "${GITHUB_WORKSPACE}/profile-trophies.svg"
 
-          # 6. Stop background server
+          # 6. Stop local server
           kill $SERVER_PID 2>/dev/null || true
 
           cd "${GITHUB_WORKSPACE}"
 
-          # 7. Validate output SVG file
+          # 7. Check if file is valid SVG
           if [ -f "profile-trophies.svg" ] && grep -q "<svg" profile-trophies.svg; then
-            echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
+            echo "[Trophies] Valid SVG generated successfully ($(wc -c < profile-trophies.svg) bytes)."
           else
-            echo "[Trophies] Error: Output does not contain a valid SVG."
+            echo "[Trophies] Error: Did not receive valid SVG output."
             cat profile-trophies.svg
             exit 1
           fi
