@@ -29,18 +29,37 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Clone the official trophy repository
+          # 1. Clone the generator repository
           git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
           cd /tmp/trophy-engine
 
-          # Execute the entry script and output SVG to repository root
-          deno run --allow-net --allow-env --allow-read src/index.ts \
-            --username "${{ github.repository_owner }}" \
-            --theme "flat" > "${GITHUB_WORKSPACE}/profile-trophies.svg"
+          # 2. Determine the entry file (server.ts or index.ts)
+          ENTRY_FILE="index.ts"
+          [ -f "server.ts" ] && ENTRY_FILE="server.ts"
+
+          echo "[Trophies] Starting local Deno service using ${ENTRY_FILE}..."
+          deno run --allow-net --allow-env --allow-read "$ENTRY_FILE" &
+          SERVER_PID=$!
+
+          # 3. Wait up to 30 seconds for local server to respond
+          echo "[Trophies] Waiting for local server on port 8080..."
+          for i in {1..30}; do
+            if curl -s "http://localhost:8080/?username=${{ github.repository_owner }}" >/dev/null 2>&1; then
+              echo "[Trophies] Server is ready."
+              break
+            fi
+            sleep 1
+          done
+
+          # 4. Fetch the rendered SVG
+          curl -fsSL "http://localhost:8080/?username=${{ github.repository_owner }}&theme=flat" -o "${GITHUB_WORKSPACE}/profile-trophies.svg"
+
+          # 5. Clean up local background server
+          kill $SERVER_PID 2>/dev/null || true
 
           cd "${GITHUB_WORKSPACE}"
 
-          # Verify that the output is valid SVG
+          # 6. Validate SVG file
           if grep -q "<svg" profile-trophies.svg; then
             echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
           else
