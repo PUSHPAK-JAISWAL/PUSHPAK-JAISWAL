@@ -2,7 +2,6 @@ name: Update GitHub Profile Trophies Cache
 
 on:
   schedule:
-    # Runs daily at 00:00 UTC to refresh stats for the day
     - cron: '0 0 * * *'
   workflow_dispatch:
   push:
@@ -21,24 +20,46 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch Profile Trophies SVG
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Generate Trophies via Local Runner Engine
+        env:
+          # Pass the user PAT to the engine's expected variables
+          TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN1: ${{ secrets.PAT_TOKEN }}
+          PORT: 8080
         run: |
-          echo "[Trophies] Downloading trophy SVG..."
-          
-          # Retry up to 3 times in case of cold-start delay
-          for i in {1..3}; do
-            curl -fsSL \
-              -A "Mozilla/5.0 (GitHubActions-CacheBot)" \
-              "https://github-profile-trophy.vercel.app/?username=${{ github.repository_owner }}&theme=flat" \
-              -o profile-trophies.svg && break || sleep 5
+          git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
+          cd /tmp/trophy-engine
+
+          deno cache main.ts
+
+          # Start server locally inside the runner
+          deno run -A main.ts &
+          SERVER_PID=$!
+
+          # Wait for runner's local port to open
+          for i in {1..30}; do
+            if curl -s "http://localhost:8080/" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
           done
 
-          # Check that we received valid SVG markup
+          # Fetch the generated SVG from localhost
+          curl -fsSL "http://localhost:8080/?username=${{ github.repository_owner }}&theme=flat" \
+            -o "${GITHUB_WORKSPACE}/profile-trophies.svg"
+
+          kill $SERVER_PID 2>/dev/null || true
+
+          cd "${GITHUB_WORKSPACE}"
           if [ -f "profile-trophies.svg" ] && grep -q "<svg" profile-trophies.svg; then
-            echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
+            echo "Success! Profile trophies generated locally on runner."
           else
-            echo "[Trophies] Error: Did not receive valid SVG output."
-            cat profile-trophies.svg
+            echo "Failed to produce SVG output."
             exit 1
           fi
 
