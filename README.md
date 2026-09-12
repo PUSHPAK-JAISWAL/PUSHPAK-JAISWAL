@@ -46,7 +46,7 @@ A collaborative open source repository focused on simplifying server startup pro
 
 ## 🏆 GitHub Profile Trophies
 
-[![trophy](https://github-profile-trophy-tawny.vercel.app/?username=PUSHPAK-JAISWAL\&theme=gruvbox)](https://github.com/ryo-ma/github-profile-trophy)
+[![GitHub Profile Trophies](https://pushpak-jaiswal.github.io/?username=Pushpak-Jaiswal&theme=flat)](https://github.com/ryo-ma/github-profile-trophy)
 
 ---
 
