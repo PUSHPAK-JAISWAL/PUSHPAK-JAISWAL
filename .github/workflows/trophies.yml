@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs automatically every day at 00:00 UTC
     - cron: '0 0 * * *'
-  workflow_dispatch: # Allows manual trigger anytime from the Actions tab
+  workflow_dispatch: # Allows manual trigger at any time from Actions tab
   push:
     branches:
       - main
@@ -21,199 +21,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Generate Daily Profile Trophies (GitHub GraphQL)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fetch Full Profile Trophies SVG from Generator
         run: |
-          cat << 'EOF' > run-trophy.mjs
-          import fs from "fs";
+          # Triggers our website service to generate the complete authentic SVG.
+          # ${{ github.repository_owner }} automatically detects whoever owns the repo!
+          curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://ais-pre-pzpnl2gceqyoab43jfmmp6-631169130903.asia-east1.run.app/api?username=${{ github.repository_owner }}&theme=flat" \
+            -o profile-trophies.svg
 
-          const THEMES = {
-            flat: { bg: "#ffffff", border: "#e1e4e8", title: "#24292e", text: "#586069", rankBg: "#f6f8fa" },
-            dark: { bg: "#151515", border: "#30363d", title: "#f0f6fc", text: "#8b949e", rankBg: "#21262d" },
-            onedark: { bg: "#282c34", border: "#3e4451", title: "#e06c75", text: "#abb2bf", rankBg: "#21252b" },
-            gruvbox: { bg: "#282828", border: "#504945", title: "#ebdbb2", text: "#a89984", rankBg: "#3c3836" },
-            dracula: { bg: "#282a36", border: "#6272a4", title: "#ff79c6", text: "#f8f8f2", rankBg: "#44475a" },
-            radical: { bg: "#141321", border: "#fe428e", title: "#fe428e", text: "#a9fef7", rankBg: "#1a192a" },
-          };
-
-          const RANK_COLORS = {
-            SSS: "#FFD700", SS: "#FF8C00", S: "#FF4500", AAA: "#00CED1",
-            AA: "#1E90FF", A: "#4169E1", B: "#32CD32", C: "#808080",
-            UNKNOWN: "#808080", SECRET: "#9370DB"
-          };
-
-          const THRESHOLDS = {
-            Commits: { SSS: 4000, SS: 2000, S: 1000, AAA: 500, AA: 200, A: 100, B: 10 },
-            Issues: { SSS: 500, SS: 200, S: 100, AAA: 50, AA: 20, A: 10, B: 5 },
-            PullRequest: { SSS: 500, SS: 200, S: 100, AAA: 50, AA: 20, A: 10, B: 5 },
-            Repositories: { SSS: 100, SS: 70, S: 50, AAA: 35, AA: 20, A: 10, B: 5 },
-            Stars: { SSS: 2000, SS: 700, S: 200, AAA: 100, AA: 50, A: 20, B: 10 },
-            Followers: { SSS: 1000, SS: 400, S: 200, AAA: 100, AA: 50, A: 20, B: 10 },
-          };
-
-          function calculateRank(value, t) {
-            if (value >= t.SSS) return "SSS";
-            if (value >= t.SS) return "SS";
-            if (value >= t.S) return "S";
-            if (value >= t.AAA) return "AAA";
-            if (value >= t.AA) return "AA";
-            if (value >= t.A) return "A";
-            if (value >= t.B) return "B";
-            return "C";
-          }
-
-          async function main() {
-            const username = process.env.TARGET_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
-            const token = process.env.GITHUB_TOKEN;
-            const theme = THEMES[process.env.TROPHY_THEME?.toLowerCase()] || THEMES.flat;
-
-            console.log(`[Trophies] Generating trophies for @${username}...`);
-
-            const gqlQuery = `
-              query($login: String!) {
-                user(login: $login) {
-                  followers { totalCount }
-                  repositories(first: 100, ownerAffiliations: OWNER) {
-                    totalCount
-                    nodes {
-                      stargazerCount
-                      languages(first: 5) { nodes { name } }
-                    }
-                  }
-                  contributionsCollection {
-                    totalCommitContributions
-                    restrictedContributionsCount
-                  }
-                  openIssues: issues(states: OPEN) { totalCount }
-                  closedIssues: issues(states: CLOSED) { totalCount }
-                  pullRequests { totalCount }
-                }
-              }
-            `;
-
-            let stats = { commits: 0, issues: 0, pullRequests: 0, repositories: 0, stars: 0, followers: 0, languages: 0 };
-            try {
-              const res = await fetch("https://api.github.com/graphql", {
-                method: "POST",
-                headers: {
-                  Authorization: `bearer ${token}`,
-                  "Content-Type": "application/json",
-                  "User-Agent": "GitHub-Profile-Trophy",
-                },
-                body: JSON.stringify({ query: gqlQuery, variables: { login: username } }),
-              });
-              const data = await res.json();
-              const u = data.data?.user;
-              if (u) {
-                const repos = u.repositories?.nodes || [];
-                const langs = new Set();
-                repos.forEach(r => r.languages?.nodes?.forEach(l => langs.add(l.name)));
-
-                let allTimeCommits = 0;
-                try {
-                  const cRes = await fetch(`https://github-contributions-api.jogruber.de/v4/${username}?y=all`);
-                  if (cRes.ok) {
-                    const cData = await cRes.json();
-                    if (cData?.total) allTimeCommits = Object.values(cData.total).reduce((a, b) => a + (typeof b === "number" ? b : 0), 0);
-                  }
-                } catch {}
-
-                if (allTimeCommits === 0) {
-                  allTimeCommits = (u.contributionsCollection?.totalCommitContributions || 0) + (u.contributionsCollection?.restrictedContributionsCount || 0);
-                }
-
-                stats = {
-                  commits: Math.max(allTimeCommits, 10),
-                  issues: (u.openIssues?.totalCount || 0) + (u.closedIssues?.totalCount || 0),
-                  pullRequests: u.pullRequests?.totalCount || 0,
-                  repositories: u.repositories?.totalCount || 0,
-                  stars: repos.reduce((sum, r) => sum + (r.stargazerCount || 0), 0),
-                  followers: u.followers?.totalCount || 0,
-                  languages: langs.size,
-                };
-              }
-            } catch (e) {
-              console.warn("GraphQL error:", e);
-            }
-
-            console.log("[Trophies] Evaluated stats:", stats);
-
-            const baseTrophies = [
-              { title: "Commits", rank: calculateRank(stats.commits, THRESHOLDS.Commits), score: stats.commits, desc: "Total Commits" },
-              { title: "PullRequest", rank: calculateRank(stats.pullRequests, THRESHOLDS.PullRequest), score: stats.pullRequests, desc: "Pull Requests" },
-              { title: "Issues", rank: calculateRank(stats.issues, THRESHOLDS.Issues), score: stats.issues, desc: "Total Issues" },
-              { title: "Repositories", rank: calculateRank(stats.repositories, THRESHOLDS.Repositories), score: stats.repositories, desc: "Total Repos" },
-              { title: "Stars", rank: calculateRank(stats.stars, THRESHOLDS.Stars), score: stats.stars, desc: "Total Stars" },
-              { title: "Followers", rank: calculateRank(stats.followers, THRESHOLDS.Followers), score: stats.followers, desc: "Followers" },
-            ];
-
-            // SSS Rank Hacker unlocked if 3 or more trophies reach S-rank or higher (S, SS, SSS)
-            const sRankCount = baseTrophies.filter(t => ["S", "SS", "SSS"].includes(t.rank)).length;
-            const isSSSRankUnlocked = sRankCount >= 3;
-
-            const extraTrophies = [
-              {
-                title: "MultipleLanguage",
-                rank: stats.languages >= 10 ? "SSS" : stats.languages >= 7 ? "SS" : stats.languages >= 5 ? "S" : stats.languages >= 3 ? "A" : "B",
-                score: stats.languages,
-                desc: "Languages Used",
-              },
-              {
-                title: "Achieve SSS",
-                rank: isSSSRankUnlocked ? "SECRET" : "?",
-                score: isSSSRankUnlocked ? 1 : 0,
-                desc: isSSSRankUnlocked ? "3+ S-Rank Trophies!" : "Needs 3 S-Ranks",
-              },
-            ];
-
-            const all = [...baseTrophies, ...extraTrophies];
-            const cols = 4;
-            const rows = Math.ceil(all.length / cols);
-            const w = 110, h = 110, gap = 10, pad = 12;
-            const totalW = pad * 2 + cols * w + (cols - 1) * gap;
-            const totalH = pad * 2 + rows * h + (rows - 1) * gap;
-
-            let svgCards = "";
-            all.forEach((t, i) => {
-              const x = pad + (i % cols) * (w + gap);
-              const y = pad + Math.floor(i / cols) * (h + gap);
-              const col = RANK_COLORS[t.rank] || "#808080";
-              const disp = typeof t.score === "number" ? t.score.toLocaleString() : t.score;
-              svgCards += `
-                <g transform="translate(${x}, ${y})">
-                  <rect x="0.5" y="0.5" width="109" height="109" rx="6" fill="${theme.bg}" stroke="${theme.border}" stroke-width="1"/>
-                  <text x="55" y="24" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="600" fill="${theme.title}">${t.title}</text>
-                  <circle cx="55" cy="56" r="23" fill="${theme.rankBg}" stroke="${col}" stroke-width="2"/>
-                  <text x="55" y="62" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="800" fill="${col}">${t.rank}</text>
-                  <text x="55" y="93" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="700" fill="${theme.text}">${disp}</text>
-                  <text x="55" y="103" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="7.5" fill="${theme.text}" opacity="0.8">${t.desc}</text>
-                </g>
-              `;
-            });
-
-            const svg = `<svg width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="${totalW}" height="${totalH}" rx="10" fill="${theme.bg}"/>
-              ${svgCards}
-            </svg>`;
-
-            fs.writeFileSync("profile-trophies.svg", svg.trim());
-            console.log("[Trophies] Successfully generated profile-trophies.svg");
-          }
-
-          main();
-          EOF
-
-          TARGET_USERNAME="${{ github.repository_owner }}" \
-          GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-          TROPHY_THEME="flat" \
-          node run-trophy.mjs
-          rm run-trophy.mjs
+          # Verify that valid SVG was received
+          if grep -q "<svg" profile-trophies.svg; then
+            echo "Successfully generated full profile-trophies.svg ($(wc -c < profile-trophies.svg) bytes)."
+          else
+            echo "Error: Service did not return valid SVG."
+            exit 1
+          fi
 
       - name: Commit and Push Cached Trophies
         run: |
