@@ -1,0 +1,49 @@
+name: Update GitHub Profile Trophies Cache
+
+on:
+  schedule:
+    # Runs every day at midnight UTC to refresh trophies for the day
+    - cron: "0 0 * * *"
+  workflow_dispatch: # Allows manual run anytime
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  update-trophies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate and Cache Daily Trophies
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Uses GitHub GraphQL API with the Action runner's token (5000 req/hr)
+          npx --yes tsx https://raw.githubusercontent.com/ryo-ma/github-profile-trophy/master/scripts/generate-trophy.ts \
+            --username "Pushpak-Jaiswal" \
+            --token "${{ secrets.GITHUB_TOKEN }}" \
+            --theme "flat" \
+            --output "profile-trophies.svg"
+
+      - name: Commit and Push Cached SVG to README
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add profile-trophies.svg
+          if git diff --staged --quiet; then
+            echo "No changes in trophy rankings today."
+          else
+            git commit -m "Auto-update profile trophies daily cache [skip ci]"
+            git push
+          fi
