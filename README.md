@@ -47,9 +47,7 @@ A collaborative open source repository focused on simplifying server startup pro
 ## 🏆 GitHub Profile Trophies
 
 <p align="center">
-  <a href="https://github.com/ryo-ma/github-profile-trophy">
-    <img src="./profile-trophies.svg" alt="GitHub Profile Trophies" />
-  </a>
+  <img src="./profile-trophies.svg" alt="GitHub Profile Trophies" />
 </p>
 
 ---
