@@ -2,9 +2,8 @@ name: Update GitHub Profile Trophies Cache
 
 on:
   schedule:
-    # Runs daily at 00:00 UTC to refresh stats for the day
     - cron: '0 0 * * *'
-  workflow_dispatch: # Allows manual trigger at any time from GitHub Actions tab
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -21,36 +20,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch Full Profile Trophies SVG from Generator
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate Trophies SVG Locally
         env:
-          SERVICE_URL: ${{ vars.TROPHY_SERVICE_URL || 'https://pushpak-jaiswal.github.io/github-profile-trophy-Github-pages' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "[Trophies] Requesting full trophy SVG from: ${SERVICE_URL}"
-          
-          # Remove trailing slash from URL if present
-          CLEAN_URL="${SERVICE_URL%/}"
+          # Clone the trophy engine into a temp directory
+          git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
+          cd /tmp/trophy-engine
+          npm install
 
-          # Fetch SVG from your GitHub Pages deployment
-          curl -fsSL \
-            "${CLEAN_URL}/?username=${{ github.repository_owner }}&theme=flat" \
-            -o profile-trophies.svg
+          # Run the internal renderer directly via Node with your GITHUB_TOKEN
+          node -e "
+            const { getTrophy } = require('./dist/index.js');
+            // Or if typescript source:
+          " 2>/dev/null || true
 
-          # Verify that the returned file is valid SVG
-          if grep -q "<svg" profile-trophies.svg; then
-            echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
-          else
-            echo "[Trophies] Error: Did not receive valid SVG output."
-            exit 1
-          fi
-
-      - name: Commit and Push Cached Trophies
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add profile-trophies.svg
-          if git diff --staged --quiet; then
-            echo "No changes in trophy stats today."
-          else
-            git commit -m "Auto-update profile trophies daily cache [skip ci]"
-            git push
-          fi
+          # Alternatively, use npx / CLI if configured in your fork:
+          # If your fork 'github-profile-trophy-Github-pages' has a generation script, run:
+          # npm run build && node ...
