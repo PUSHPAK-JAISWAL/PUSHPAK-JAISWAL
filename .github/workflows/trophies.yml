@@ -2,8 +2,9 @@ name: Update GitHub Profile Trophies Cache
 
 on:
   schedule:
+    # Runs daily at 00:00 UTC to refresh stats for the day
     - cron: '0 0 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual trigger at any time from GitHub Actions tab
   push:
     branches:
       - main
@@ -29,42 +30,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. Clone the generator repository
+          # 1. Clone the repository
           git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
           cd /tmp/trophy-engine
 
-          # 2. Determine the entry file (server.ts or index.ts)
-          ENTRY_FILE="index.ts"
-          [ -f "server.ts" ] && ENTRY_FILE="server.ts"
+          # 2. Run runner script to fetch data and write SVG directly
+          deno run --allow-net --allow-env --allow-read --allow-write - << 'EOF'
+          import { renderTrophy } from "./mod.ts";
 
-          echo "[Trophies] Starting local Deno service using ${ENTRY_FILE}..."
-          deno run --allow-net --allow-env --allow-read "$ENTRY_FILE" &
-          SERVER_PID=$!
+          const username = "${{ github.repository_owner }}";
+          const theme = "flat";
 
-          # 3. Wait up to 30 seconds for local server to respond
-          echo "[Trophies] Waiting for local server on port 8080..."
-          for i in {1..30}; do
-            if curl -s "http://localhost:8080/?username=${{ github.repository_owner }}" >/dev/null 2>&1; then
-              echo "[Trophies] Server is ready."
-              break
-            fi
-            sleep 1
-          done
-
-          # 4. Fetch the rendered SVG
-          curl -fsSL "http://localhost:8080/?username=${{ github.repository_owner }}&theme=flat" -o "${GITHUB_WORKSPACE}/profile-trophies.svg"
-
-          # 5. Clean up local background server
-          kill $SERVER_PID 2>/dev/null || true
+          try {
+            console.log(`[Trophies] Generating SVG for user: ${username}...`);
+            const svg = await renderTrophy(username, { theme });
+            await Deno.writeTextFile("${{ github.workspace }}/profile-trophies.svg", svg);
+            console.log("[Trophies] SVG generated successfully.");
+          } catch (err) {
+            console.error("[Trophies] Generation failed:", err);
+            Deno.exit(1);
+          }
+          EOF
 
           cd "${GITHUB_WORKSPACE}"
 
-          # 6. Validate SVG file
-          if grep -q "<svg" profile-trophies.svg; then
+          # 3. Validate output file
+          if [ -f "profile-trophies.svg" ] && grep -q "<svg" profile-trophies.svg; then
             echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
           else
             echo "[Trophies] Error: Output does not contain a valid SVG."
-            cat profile-trophies.svg
             exit 1
           fi
 
