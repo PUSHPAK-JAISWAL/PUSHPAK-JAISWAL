@@ -20,26 +20,43 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
         with:
-          node-version: 20
+          deno-version: v1.x
 
-      - name: Generate Trophies SVG Locally
+      - name: Generate Trophies SVG with Deno
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Clone the trophy engine into a temp directory
+          # Clone the official trophy repository
           git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
           cd /tmp/trophy-engine
-          npm install
 
-          # Run the internal renderer directly via Node with your GITHUB_TOKEN
-          node -e "
-            const { getTrophy } = require('./dist/index.js');
-            // Or if typescript source:
-          " 2>/dev/null || true
+          # Execute the entry script and output SVG to repository root
+          deno run --allow-net --allow-env --allow-read src/index.ts \
+            --username "${{ github.repository_owner }}" \
+            --theme "flat" > "${GITHUB_WORKSPACE}/profile-trophies.svg"
 
-          # Alternatively, use npx / CLI if configured in your fork:
-          # If your fork 'github-profile-trophy-Github-pages' has a generation script, run:
-          # npm run build && node ...
+          cd "${GITHUB_WORKSPACE}"
+
+          # Verify that the output is valid SVG
+          if grep -q "<svg" profile-trophies.svg; then
+            echo "[Trophies] Valid SVG received successfully ($(wc -c < profile-trophies.svg) bytes)."
+          else
+            echo "[Trophies] Error: Output does not contain a valid SVG."
+            cat profile-trophies.svg
+            exit 1
+          fi
+
+      - name: Commit and Push Cached Trophies
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add profile-trophies.svg
+          if git diff --staged --quiet; then
+            echo "No changes in trophy stats today."
+          else
+            git commit -m "Auto-update profile trophies daily cache [skip ci]"
+            git push
+          fi
