@@ -27,9 +27,8 @@ jobs:
 
       - name: Generate Trophies via Local Runner Engine
         env:
-          # Pass the user PAT to the engine's expected variables
-          TOKEN: ${{ secrets.PAT_TOKEN }}
-          GITHUB_TOKEN1: ${{ secrets.PAT_TOKEN }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN1: ${{ secrets.GITHUB_TOKEN }}
           PORT: 8080
         run: |
           git clone --depth=1 https://github.com/ryo-ma/github-profile-trophy.git /tmp/trophy-engine
