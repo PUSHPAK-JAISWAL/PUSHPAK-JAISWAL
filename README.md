@@ -57,7 +57,8 @@ A collaborative open source repository focused on simplifying server startup pro
 <img src="https://ghchart.rshah.org/PUSHPAK-JAISWAL"/>
 
 ---
-#OpenSource Proof
+## OpenSource Proof
+
 [![OSS Proof](https://raw.githubusercontent.com/PUSHPAK-JAISWAL/OSS-Proof/main/data/badges/pushpak-jaiswal.svg)](https://pushpak-jaiswal.github.io/OSS-Proof/#/verify/PUSHPAK-JAISWAL)
 ---
 Thanks for stopping by! Let's learn, build, and grow together. 🚀
