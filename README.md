@@ -59,6 +59,6 @@ A collaborative open source repository focused on simplifying server startup pro
 ---
 ## OpenSource Proof
 
-<a href="https://pushpak-jaiswal.github.io/OSS-Proof/#/verify/PUSHPAK-JAISWAL"><img src="https://raw.githubusercontent.com/PUSHPAK-JAISWAL/OSS-Proof/main/data/badges/pushpak-jaiswal.svg" alt="OSS Proof" width="380" /></a>
+<a href="https://pushpak-jaiswal.github.io/OSS-Proof/#/verify/PUSHPAK-JAISWAL"><img src="https://raw.githubusercontent.com/PUSHPAK-JAISWAL/OSS-Proof/main/data/badges/pushpak-jaiswal.paper.svg" alt="OSS Proof grade B" width="380" /></a>
 ---
 Thanks for stopping by! Let's learn, build, and grow together. 🚀
